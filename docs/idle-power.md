@@ -62,3 +62,46 @@ same windows, fast-mode setting and desktop settings. Confirm that the
 `pipe-source` thread blocks rather than consuming a core, then check playback,
 microphone capture, lock/unlock and background/foreground transitions. Compare
 temperature or battery use only after a matched device run and cooling period.
+
+### Device validation, 2026-10-17
+
+A local LinPad 1.5.0 build 4437 carrying this fix was installed over build 4428
+on an iPad Pro 11-inch (M5), iPadOS 26.6.2. The existing Linux root was reused
+and its rootfs version remained `202610031701`.
+
+Time Profiler used the same device and a 15-second recording limit:
+
+| Recording | Wall time | Total sampled CPU time | Average, one core | `pipe-source` CPU time |
+| --- | ---: | ---: | ---: | ---: |
+| 4428, before fix | 15.730690 s | 15.652 s | 99.50% | 15.447 s |
+| 4437, first idle run | 15.768679 s | 0.109 s | 0.69% | no samples |
+| 4437, explicitly activated in foreground | 15.729654 s | 0.109 s | 0.69% | 0.002 s |
+
+The foreground run activated the existing process without restarting it; the
+display was on and active. PulseAudio's microphone source was still loaded and
+suspended, and `pipe-source` remained present in the guest process list. The
+result therefore does not depend on unloading the microphone source. These are
+short running-thread CPU samples, not watt, battery-life or temperature
+measurements. The trace lifecycle table reported the attached app's state as
+unknown; the foreground run instead has a successful device activation record.
+The old and new runs were both idle with Fast Mode On, but exact window contents
+were not captured as a controlled benchmark. The native regression separately
+isolates the FIFO polling defect.
+
+JIT was enabled before Linux boot for the new process. Native readback confirmed
+`AppDelegate.jitStatus == 1`, `fastModeState == 2`,
+`fastModeNewProgramsOnly == 0`, a 256 MiB RX arena and `txm_arena == 1`.
+The debugger was detached before profiling and left detached afterwards.
+
+The tested app's native Swift, Objective-C and C code was compiled as an iOS
+arm64 Release build with native JIT and virtgpu enabled. Its root archive was
+byte-identical to the original 1.5.0 package. Because the local resource
+compilers required an unavailable simulator runtime, unchanged compiled assets
+and storyboards were reused from the verified original package. All 34 reused
+files matched the original, and their source inputs had no changes from
+`v1.5.0`. No resource or project configuration change is part of this fix.
+
+Native poll regressions and UBSan passed. DesktopKit iOS sources and test sources
+compiled; XCTest execution was unavailable without a simulator runtime. Actual
+microphone capture, playback, lock/unlock and extended temperature/battery runs
+remain separate acceptance checks.
