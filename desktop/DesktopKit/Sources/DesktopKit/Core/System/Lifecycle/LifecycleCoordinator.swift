@@ -203,7 +203,7 @@ final class LifecycleCoordinator {
     /// The keyboard goes back where it was: the focused Linux window takes it again and
     /// ishwl hears which surface has focus (it saw "leave" on the way out).
     func didBecomeActive() {
-        guard let controller else { return }
+        guard let controller, controller.input.isActive else { return }
         controller.windowFocusChanged(controller.windowManager.focusedWindowID)
         controller.input.ensureKeyCommandsReachable()
     }

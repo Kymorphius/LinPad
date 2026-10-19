@@ -35,6 +35,8 @@ final class DesktopWindow: Identifiable {
     @PerceptionIgnored var onCloseRequest: (() -> Void)?
     /// The last picture of the window taken while nothing covered it (window switcher).
     @PerceptionIgnored var snapshot: UIImage?
+    /// The live terminal belongs to its window, even while presented full-screen.
+    @PerceptionIgnored var terminalSession: TerminalSession?
 
     init(appID: String, symbol: String, title: String, arguments: [String: String] = [:],
          frame: CGRect, zIndex: Int, workspace: Int) {
@@ -229,7 +231,11 @@ final class WindowManager {
     func displayFrame(for window: DesktopWindow) -> CGRect {
         let frame = tiledOrFloatingFrame(for: window)
         guard keyboard.lifts(window.id), window.id == focusedWindowID else { return frame }
-        return WindowGeometry.avoidingKeyboard(frame, availableHeight: desktopSize.height - keyboardOverlap,
+        let availableHeight = desktopSize.height - keyboardOverlap
+        if window.appID == AppID.terminal {
+            return WindowGeometry.liftingAboveKeyboard(frame, availableHeight: availableHeight)
+        }
+        return WindowGeometry.avoidingKeyboard(frame, availableHeight: availableHeight,
                                                minimumHeight: Self.minimumSize.height)
     }
 

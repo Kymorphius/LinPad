@@ -56,8 +56,9 @@ static uint64_t get_total_ram() {
 static void sysinfo_specific(struct sys_info *info) {
     uint64_t total_ram = get_total_ram();
 #if defined(GUEST_ARM64)
-    // Same numbers as /proc/meminfo: physical memory, and what can still be
-    // allocated (on iOS, this app's jetsam headroom) as free.
+    // Same numbers as /proc/meminfo: host physical memory or the app's allowance
+    // when available, and what can still be allocated as free (on iOS, this
+    // app's jetsam headroom). The allowance may exceed host physical memory.
     struct mem_usage usage = get_mem_usage();
     info->totalram = usage.total ? usage.total : total_ram;
     info->freeram = usage.available;

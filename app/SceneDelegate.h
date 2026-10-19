@@ -16,6 +16,7 @@ API_AVAILABLE(ios(13))
 @interface SceneDelegate : UIResponder <UIWindowSceneDelegate>
 
 @property (nonatomic) UIWindow *window;
+- (void)switchToDesktop;
 
 @end
 

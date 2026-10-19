@@ -143,6 +143,16 @@ enum WindowGeometry {
         return result
     }
 
+    /// Lifts a terminal without resizing its viewport during the desktop animation.
+    /// Its native controller applies any remaining keyboard overlap after the frame
+    /// change completes, so only that controller changes the terminal's usable height.
+    static func liftingAboveKeyboard(_ frame: CGRect, availableHeight: CGFloat) -> CGRect {
+        guard availableHeight > 0, frame.maxY > availableHeight else { return frame }
+        var result = frame
+        result.origin.y = max(0, availableHeight - frame.height)
+        return result
+    }
+
     /// After the desktop changes size (rotation, Stage Manager), a window that fits is moved
     /// back fully on screen instead of staying partly off an edge.
     static func keptOnScreen(_ frame: CGRect, in bounds: CGSize) -> CGRect {

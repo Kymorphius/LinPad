@@ -318,6 +318,18 @@ struct SettingsAppView: View {
 
     private var desktopSection: some View {
         SettingsSection(title: "Desktop", symbol: "macwindow.on.rectangle") {
+            if let switching = host as? ClassicTerminalSwitching {
+                SettingsRow(title: "Interface") {
+                    Button("Switch to Terminal Mode") { desktopController?.switchToClassicTerminal() }
+                        .disabled(!switching.canSwitchToClassicTerminal)
+                        .accessibilityIdentifier("settings.switchToTerminal")
+                }
+                Text(switching.canSwitchToClassicTerminal ? "Desktop windows and terminal sessions stay open while you switch." : "Starting Linux…")
+                    .font(.caption)
+                    .foregroundStyle(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                ThemedSeparator()
+            }
             Text("Style").font(.callout)
             DesktopStyleChooser(selection: $styleID)
             Text("Changes the panels, window buttons, launcher and the Linux apps' GTK, Qt and icon themes. Shortcuts and window management stay the same.")

@@ -24,12 +24,42 @@ final class TerminalSession {
     private let command: String?
     private let cwd: String?
     private var cachedController: UIViewController?
+    fileprivate weak var container: TerminalContainerController?
+    fileprivate(set) var isLeased = false
+    private var focusOnReclaim = false
+    var focusIntent = TerminalFocusIntent()
 
-    init(context: AppLaunchContext) {
+    init(context: AppLaunchContext, controller: UIViewController? = nil) {
         host = context.host
         command = context.arguments[AppArgument.command]
         cwd = context.arguments[AppArgument.cwd]
+        cachedController = controller
     }
+
+    fileprivate func lease() -> UIViewController {
+        let content = controller
+        isLeased = true
+        // Entering terminal mode is an explicit request to use this terminal.
+        focusIntent.preserveActiveInput()
+        if content.isViewLoaded {
+            content.view.endEditing(true)
+        }
+        if content.parent != nil {
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        return content
+    }
+
+    fileprivate func reclaim() {
+        isLeased = false
+        container?.mountContent()
+        if focusOnReclaim { container?.setKeyboardFocus(true) }
+        focusOnReclaim = false
+    }
+
+    func requestDesktopFocusOnReclaim() { focusOnReclaim = true }
 
     var controller: UIViewController {
         if let cachedController { return cachedController }
@@ -92,6 +122,12 @@ struct TerminalAppView: View {
         desktop = context.desktop
     }
 
+    init(context: AppLaunchContext, session: TerminalSession) {
+        _session = State(initialValue: session)
+        window = context.window
+        desktop = context.desktop
+    }
+
     var body: some View {
         WithPerceptionTracking {
             TerminalControllerView(session: session, isFocused: isFocused) { [desktop, session] in
@@ -125,10 +161,12 @@ private struct TerminalControllerView: UIViewControllerRepresentable {
 
 /// A fresh container per representable that re-parents the cached session controller.
 /// It also owns the terminal's context menu (secondary click or long press) and drops.
-private final class TerminalContainerController: UIViewController, UIContextMenuInteractionDelegate, UIDropInteractionDelegate {
+final class TerminalContainerController: UIViewController, UIContextMenuInteractionDelegate, UIDropInteractionDelegate {
     private let content: UIViewController
     weak var session: TerminalSession?
     var openNewWindow: (@MainActor () -> Void)?
+    private var windowIsFocused = false
+    private var inputReadyObserver: NSObjectProtocol?
 
     init(content: UIViewController) {
         self.content = content
@@ -142,21 +180,60 @@ private final class TerminalContainerController: UIViewController, UIContextMenu
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        session?.container = self
+        mountContent()
+        view.addInteraction(UIContextMenuInteraction(delegate: self))
+        view.addInteraction(UIDropInteraction(delegate: self))
+        inputReadyObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name("DesktopTerminalInputReady"), object: content, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyPendingInput() }
+        }
+    }
+
+    func mountContent() {
+        guard isViewLoaded, session?.isLeased != true, content.parent !== self else { return }
         if content.parent != nil {
+            if Self.textInputView(in: content.view)?.isFirstResponder == true {
+                session?.focusIntent.preserveActiveInput()
+            }
             content.willMove(toParent: nil)
             content.view.removeFromSuperview()
             content.removeFromParent()
         }
         addChild(content)
+        content.view.translatesAutoresizingMaskIntoConstraints = true
         content.view.frame = view.bounds
         content.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(content.view)
         content.didMove(toParent: self)
-        view.addInteraction(UIContextMenuInteraction(delegate: self))
-        view.addInteraction(UIDropInteraction(delegate: self))
         // The terminal is drawn by a web view, which would take drops itself and turn text
         // into page content; drops belong to the shell.
         Self.removeWebDropInteractions(in: content.view)
+    }
+
+    deinit {
+        if let inputReadyObserver { NotificationCenter.default.removeObserver(inputReadyObserver) }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        applyPendingInput()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyPendingInput()
+    }
+
+    private func applyPendingInput() {
+        guard session?.isLeased != true, windowIsFocused, session?.focusIntent.pending == true,
+              isViewLoaded, view.window != nil, !view.isHidden,
+              let input = Self.textInputView(in: content.view), input.window != nil,
+              input.isDescendant(of: view), !input.isHidden else { return }
+        if input.isFirstResponder || input.becomeFirstResponder() {
+            session?.focusIntent.acquired()
+        }
     }
 
     private static func removeWebDropInteractions(in root: UIView) {
@@ -233,14 +310,23 @@ private final class TerminalContainerController: UIViewController, UIContextMenu
         }
     }
 
-    /// Follows the desktop's window focus. With a hardware keyboard the focused terminal
-    /// takes typing at once; on touch alone it waits for a tap, so focusing a window by its
-    /// title bar does not throw the on-screen keyboard over the desktop.
+    /// The initial focused launch may consume its pending request when attached.
+    /// A blur cancels it, so later title-bar or taskbar focus does not show the
+    /// software keyboard. Hardware keyboard focus still takes typing at once.
     func setKeyboardFocus(_ focused: Bool) {
+        guard session?.isLeased != true else { return }
+        windowIsFocused = focused
+        session?.focusIntent.setFocused(focused)
+        guard isViewLoaded else { return }
+        if focused { applyPendingInput() }
         guard let input = Self.textInputView(in: content.view) else { return }
         if focused {
             guard GCKeyboard.coalesced != nil, !input.isFirstResponder else { return }
-            DispatchQueue.main.async { input.becomeFirstResponder() }
+            DispatchQueue.main.async { [weak self, weak input] in
+                guard let self, self.session?.isLeased != true, self.windowIsFocused, let input, input.window != nil,
+                      input.isDescendant(of: self.view) else { return }
+                input.becomeFirstResponder()
+            }
         } else if input.isFirstResponder {
             input.resignFirstResponder()
         }
@@ -252,6 +338,109 @@ private final class TerminalContainerController: UIViewController, UIContextMenu
             if let found = textInputView(in: subview) { return found }
         }
         return nil
+    }
+}
+
+/// Presents the very same controller in a full-screen shell until the desktop reclaims it.
+@MainActor
+public final class TerminalFullscreenController: UIViewController {
+    private let session: TerminalSession
+    private let returnToDesktop: () -> Void
+    private let sessionEnded: () -> Void
+    private let content: UIViewController
+    private var released = false
+    private var exitObserver: NSObjectProtocol?
+    private var inputReadyObserver: NSObjectProtocol?
+
+    init(session: TerminalSession, returnToDesktop: @escaping () -> Void, sessionEnded: @escaping () -> Void) {
+        self.session = session
+        self.returnToDesktop = returnToDesktop
+        self.sessionEnded = sessionEnded
+        self.content = session.lease()
+        super.init(nibName: nil, bundle: nil)
+        exitObserver = NotificationCenter.default.addObserver(forName: Notification.Name("DesktopTerminalSessionExited"),
+                                                               object: nil, queue: .main) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, !self.released, var owner = note.object as? UIViewController else { return }
+                while owner !== self.content {
+                    guard let parent = owner.parent else { return }
+                    owner = parent
+                }
+                guard let state = note.userInfo?["handled"] as? NSMutableArray else { return }
+                state[0] = true
+                // Let the native exit handler clear its task/session before the window
+                // and its controller can be released.
+                DispatchQueue.main.async { self.sessionEnded() }
+            }
+        }
+        inputReadyObserver = NotificationCenter.default.addObserver(forName: Notification.Name("DesktopTerminalInputReady"),
+                                                                     object: content, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.applyPendingInput() }
+        }
+    }
+
+    @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
+
+    deinit {
+        if let exitObserver { NotificationCenter.default.removeObserver(exitObserver) }
+        if let inputReadyObserver { NotificationCenter.default.removeObserver(inputReadyObserver) }
+    }
+
+    public override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = .secondarySystemBackground
+        let button = UIButton(type: .system)
+        button.setTitle("Desktop", for: .normal)
+        button.addTarget(self, action: #selector(backToDesktop), for: .touchUpInside)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(button)
+        addChild(content)
+        content.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(content.view)
+        content.didMove(toParent: self)
+        NSLayoutConstraint.activate([
+            button.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            button.heightAnchor.constraint(equalToConstant: 44),
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 72),
+            content.view.topAnchor.constraint(equalTo: button.bottomAnchor),
+            content.view.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            content.view.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            content.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+    }
+
+    @objc private func backToDesktop() { returnToDesktop() }
+
+    public override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        applyPendingInput()
+    }
+
+    private func applyPendingInput() {
+        guard !released, isViewLoaded, view.window != nil,
+              session.focusIntent.pending || GCKeyboard.coalesced != nil,
+              let input = TerminalContainerController.textInputView(in: content.view),
+              input.window != nil, input.isDescendant(of: view), !input.isHidden else { return }
+        if input.isFirstResponder || input.becomeFirstResponder() {
+            session.focusIntent.acquired()
+        }
+    }
+
+    /// Called before the scene returns to the retained desktop root.
+    @objc public func releaseSession() {
+        guard !released else { return }
+        released = true
+        if content.parent === self {
+            if TerminalContainerController.textInputView(in: content.view)?.isFirstResponder == true {
+                session.focusIntent.preserveActiveInput()
+            }
+            content.view.endEditing(true)
+            content.willMove(toParent: nil)
+            content.view.removeFromSuperview()
+            content.removeFromParent()
+        }
+        session.reclaim()
     }
 }
 

@@ -16,6 +16,7 @@
 #import "NSObject+SaneKVO.h"
 #import "LinuxInterop.h"
 #import "SceneDelegate.h"
+#import "TerminalKeyboardGeometry.h"
 @import GameController;
 #include "kernel/init.h"
 #include "kernel/task.h"
@@ -53,6 +54,9 @@
 
 @property BOOL ignoreKeyboardMotion;
 @property (nonatomic) BOOL hasExternalKeyboard;
+@property TerminalKeyboardState keyboardState;
+@property (strong, nonatomic) UIView *classicToolbar;
+@property (strong, nonatomic) NSLayoutConstraint *classicTopConstraint;
 
 @end
 
@@ -74,7 +78,45 @@
 #endif
 
     self.terminal = self.terminal;
-    [self.termView becomeFirstResponder];
+    if (!self.embedded && NSClassFromString(@"DesktopBridge")) {
+        // The storyboard pins the terminal to the safe-area top. Reserve a separate
+        // toolbar instead of covering the first terminal rows with the mode switch.
+        NSLayoutConstraint *terminalTop = nil;
+        for (NSLayoutConstraint *constraint in self.view.constraints) {
+            if (constraint.firstItem == self.termView && constraint.firstAttribute == NSLayoutAttributeTop &&
+                constraint.secondItem == self.view.safeAreaLayoutGuide && constraint.secondAttribute == NSLayoutAttributeTop) {
+                terminalTop = constraint;
+                break;
+            }
+        }
+        if (terminalTop) {
+            terminalTop.constant += 44;
+            self.classicTopConstraint = terminalTop;
+            UIView *toolbar = [UIView new];
+            toolbar.backgroundColor = UIColor.secondarySystemBackgroundColor;
+            toolbar.translatesAutoresizingMaskIntoConstraints = NO;
+            [self.view addSubview:toolbar];
+            self.classicToolbar = toolbar;
+            UIButton *desktopButton = [UIButton buttonWithType:UIButtonTypeSystem];
+            [desktopButton setTitle:@"Desktop" forState:UIControlStateNormal];
+            desktopButton.contentEdgeInsets = UIEdgeInsetsMake(5, 10, 5, 10);
+            desktopButton.translatesAutoresizingMaskIntoConstraints = NO;
+            [desktopButton addTarget:self action:@selector(switchToDesktop:) forControlEvents:UIControlEventTouchUpInside];
+            [toolbar addSubview:desktopButton];
+            [NSLayoutConstraint activateConstraints:@[
+                [toolbar.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor],
+                [toolbar.leadingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.leadingAnchor],
+                [toolbar.trailingAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.trailingAnchor],
+                [toolbar.heightAnchor constraintEqualToConstant:44],
+                [desktopButton.trailingAnchor constraintEqualToAnchor:toolbar.trailingAnchor constant:-8],
+                [desktopButton.centerYAnchor constraintEqualToAnchor:toolbar.centerYAnchor],
+                [desktopButton.heightAnchor constraintGreaterThanOrEqualToConstant:44],
+            ]];
+        }
+    }
+    // Desktop containers acquire focus only after their window is attached and focused.
+    if (!self.embedded)
+        [self.termView becomeFirstResponder];
 
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:self
@@ -129,6 +171,30 @@
         });
     }];
     [self _updateBadge];
+}
+
+- (void)switchToDesktop:(id)sender {
+    id delegate = self.view.window.windowScene.delegate;
+    if ([delegate isKindOfClass:SceneDelegate.class])
+        [(SceneDelegate *)delegate switchToDesktop];
+}
+
+- (void)adoptAsDesktopTerminal {
+    if (self.embedded) return;
+    self.embedded = YES;
+    self.sceneSession = nil;
+    if (self.isViewLoaded) {
+        if (self.classicToolbar) {
+            [self.classicToolbar removeFromSuperview];
+            self.classicToolbar = nil;
+            self.classicTopConstraint.constant -= 44;
+            self.classicTopConstraint = nil;
+        }
+        self.bottomConstraint.constant = 0;
+        self.keyboardState = (TerminalKeyboardState){TerminalKeyboardUnknown};
+        [self _updateStyleFromPreferences:NO];
+        [self.view setNeedsLayout];
+    }
 }
 
 - (void)awakeFromNib {
@@ -252,6 +318,16 @@
         return;
 
     [self.sessionTerminal destroy];
+    if (self.embedded) {
+        NSMutableArray<NSNumber *> *state = [NSMutableArray arrayWithObject:@NO];
+        [NSNotificationCenter.defaultCenter postNotificationName:@"DesktopTerminalSessionExited" object:self userInfo:@{@"handled": state}];
+        if (state.firstObject.boolValue) {
+            current = NULL;
+            self.sessionPid = 0;
+            self.sessionTerminal = nil;
+            return;
+        }
+    }
     // On iOS 13, there are multiple windows, so just close this one.
     if (@available(iOS 13, *)) {
         // On iPhone, destroying scenes will fail, but the error doesn't actually go to the error handler, which is really stupid. Apple doesn't fix bugs, so I'm forced to just add a check here.
@@ -354,6 +430,10 @@
 }
 
 - (void)keyboardDidSomething:(NSNotification *)notification {
+    if ([self.termView numericViewportTraceEnabled])
+        [self.termView traceKeyboardEvent:[notification.name isEqualToString:UIKeyboardDidChangeFrameNotification] ? 121 : 120
+                          screenFrame:[notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue]
+                           localFrame:CGRectNull padding:self.bottomConstraint.constant controllerView:self.viewIfLoaded];
     if (self.ignoreKeyboardMotion)
         return;
 
@@ -363,29 +443,48 @@
     if (notification.object != nil)
         screen = notification.object;
     CGRect keyboardFrame = [self.view convertRect:screenKeyboardFrame fromCoordinateSpace:screen.coordinateSpace];
-    if (CGRectEqualToRect(keyboardFrame, CGRectZero))
+    TerminalKeyboardGeometry geometry = TerminalKeyboardGeometryForFrames(
+        screenKeyboardFrame, screen.bounds, keyboardFrame, self.view.bounds,
+        self.view.safeAreaInsets.bottom, self.termView.inputAccessoryView.frame.size.height);
+    [self.termView traceKeyboardEvent:122 screenFrame:screenKeyboardFrame localFrame:keyboardFrame
+                             padding:geometry.padding controllerView:self.viewIfLoaded];
+    if (geometry.presence == TerminalKeyboardUnknown)
         return;
-    CGRect intersection = CGRectIntersection(keyboardFrame, self.view.bounds);
-    keyboardFrame = intersection;
-    NSLog(@"%@ %@", notification.name, @(keyboardFrame));
-    BOOL onlyAccessoryLeft = keyboardFrame.size.height < 100 && self.termView.inputAccessoryView != nil;
-    if (self.embedded && onlyAccessoryLeft && GCKeyboard.coalescedKeyboard == nil && self.termView.isFirstResponder) {
+    BOOL completedFrameChange = [notification.name isEqualToString:UIKeyboardDidChangeFrameNotification];
+    BOOL keyboardDismissal = TerminalKeyboardCompletedDismissal(
+        &_keyboardState, geometry.presence, completedFrameChange);
+    if (self.embedded && keyboardDismissal &&
+        GCKeyboard.coalescedKeyboard == nil && self.termView.isFirstResponder) {
         // The on-screen keyboard was put away with its own key; the extra keys go with it.
         // A tap on the terminal brings both back.
         [self.termView resignFirstResponder];
+        // Continue updating the layout for this completed frame. In particular,
+        // a hidden keyboard must clear any padding left by its visible frame.
+    }
+    // Keep the row through WillChange: removing it reloads input views and would
+    // erase the accessory before the completed dismissal can relinquish focus.
+    if (TerminalKeyboardShouldUpdateExternalState(geometry.presence, completedFrameChange))
+        self.hasExternalKeyboard = geometry.presence != TerminalKeyboardSoftware;
+
+    // An embedded terminal can still be resized by desktop keyboard avoidance
+    // between WillChange and DidChange. Wait for the settled local geometry so
+    // the terminal contents do not jump through an intermediate inset.
+    if (!TerminalKeyboardShouldApplyLocalPadding(self.embedded, completedFrameChange))
+        return;
+
+    if (self.embedded && fabs(self.bottomConstraint.constant - geometry.padding) <= 0.5)
+        return;
+    self.bottomConstraint.constant = geometry.padding;
+    [self.termView traceKeyboardEvent:123 screenFrame:screenKeyboardFrame localFrame:keyboardFrame
+                             padding:geometry.padding controllerView:self.viewIfLoaded];
+
+    if (self.embedded) {
+        [self.view setNeedsUpdateConstraints];
+        [self.view layoutIfNeeded];
+        [self.termView traceKeyboardEvent:124 screenFrame:screenKeyboardFrame localFrame:keyboardFrame
+                                 padding:geometry.padding controllerView:self.viewIfLoaded];
         return;
     }
-    self.hasExternalKeyboard = keyboardFrame.size.height < 100;
-    CGFloat pad = CGRectGetMaxY(self.view.bounds) - CGRectGetMinY(keyboardFrame);
-    // The keyboard appears to be undocked. This means it can either be split or
-    // truly floating. In the former case we want to keep the pad, but in the
-    // latter we should fall back to the input accessory view instead of the
-    // keyboard.
-    if (pad != keyboardFrame.size.height && keyboardFrame.size.width != UIScreen.mainScreen.bounds.size.width) {
-        pad = MAX(self.view.safeAreaInsets.bottom, self.termView.inputAccessoryView.frame.size.height);
-    }
-    // NSLog(@"pad %f", pad);
-    self.bottomConstraint.constant = pad;
 
     BOOL initialLayout = self.termView.needsUpdateConstraints;
     [self.view setNeedsUpdateConstraints];
@@ -398,12 +497,16 @@
                             options:curve.integerValue << 16
                          animations:^{
                              [self.view layoutIfNeeded];
+                             [self.termView traceKeyboardEvent:125 screenFrame:screenKeyboardFrame localFrame:keyboardFrame
+                                                      padding:geometry.padding controllerView:self.viewIfLoaded];
                          }
                          completion:nil];
     }
 }
 
 - (void)setHasExternalKeyboard:(BOOL)hasExternalKeyboard {
+    if (_hasExternalKeyboard == hasExternalKeyboard)
+        return;
     _hasExternalKeyboard = hasExternalKeyboard;
     [self _updateStyleFromPreferences:YES];
 }

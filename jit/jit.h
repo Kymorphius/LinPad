@@ -11,6 +11,10 @@ struct cpu_state;
 struct tlb;
 struct jit_mm;
 
+// Experimental translation policy, set once from the native startup environment.
+// Default off; ISH_JIT_FORWARD_FALLTHROUGH=1 enables forward conditional fallthrough.
+extern int jit_forward_fallthrough;
+
 // True once code memory has been acquired and ISH_JIT is not set to 0.
 // Cheap after the first call.
 bool jit_enabled(void);

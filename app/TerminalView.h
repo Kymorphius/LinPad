@@ -29,4 +29,8 @@ enum OverrideAppearance {
 
 @property (nonatomic) Terminal *terminal;
 
+// Internal numeric-only diagnostic hooks; absent Info opt-in makes them no-ops.
+- (BOOL)numericViewportTraceEnabled;
+- (void)traceKeyboardEvent:(NSUInteger)event screenFrame:(CGRect)screenFrame localFrame:(CGRect)localFrame padding:(CGFloat)padding controllerView:(UIView *)controllerView;
+
 @end

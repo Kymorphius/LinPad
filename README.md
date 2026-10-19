@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="https://img.shields.io/badge/🐧-LinPad-0A84FF?style=for-the-badge&labelColor=1a1a1a" alt="LinPad" height="60">
+  <img src="https://img.shields.io/badge/🐧-LinPad--Revanced-0A84FF?style=for-the-badge&labelColor=1a1a1a" alt="LinPad-Revanced" height="60">
 </p>
 
-<h1 align="center">LinPad — Linux for iPad</h1>
+<h1 align="center">LinPad-Revanced — Linux for iPad</h1>
 
 <p align="center">
   <strong>A real Linux desktop on your iPad</strong><br>
@@ -44,6 +44,30 @@
   <img src="https://img.shields.io/badge/Vulkan-Venus_→_Metal-AC162C?style=flat-square&logo=vulkan" alt="Vulkan">
   <img src="https://img.shields.io/badge/License-GPLv3-blue?style=flat-square" alt="GPLv3">
 </p>
+
+---
+
+## About this fork
+
+**LinPad-Revanced** is a downstream fork of [fspecii/LinPad](https://github.com/fspecii/LinPad).
+The original LinPad authors' credits, GPLv3 license and upstream documentation are
+preserved below. Upstream download links refer to upstream releases; this fork's
+source changes require a separately built and signed app.
+
+Downstream work includes:
+
+- Lower idle CPU use in polling and desktop system monitors.
+- Desktop terminal focus, keyboard viewport and rotation handling. Windowed
+  keyboard avoidance is still being refined.
+- [Switching between desktop and classic terminal mode](release/INTERFACE-MODES.md)
+  while retaining the same terminal session.
+- [On-demand SSH and bounded listener recovery after resume](release/SSH-IPAD.md).
+- [USB JIT activation](release/USB-JIT.md), memory entitlement auditing, and
+  reproducible [benchmark tools](tools/benchmark/README.md).
+
+This repository contains source and generic operator guides. Device-specific
+signing material, credentials, build products and private diagnostic records are
+not distributed here.
 
 ---
 

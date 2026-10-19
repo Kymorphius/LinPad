@@ -43,6 +43,7 @@ uint32_t jit_promote_after = 128;   // tier-1 executions before tier-2 retransla
 static int force_tier;             // ISH_JIT_TIER=1/2 (testing)
 int jit_force_tier1;
 int jit_tier1_compact = 0;      // ISH_JIT_COMPACT=1: cacheable code starts compact (stubs, counted, promoted)
+int jit_forward_fallthrough = 0;   // ISH_JIT_FORWARD_FALLTHROUGH=1: experimental forward conditional fallthrough
 
 static void install_signals(void);
 static void install_pressure_handler(void);
@@ -180,6 +181,8 @@ static bool start_locked(void) {
     const char *cm = getenv("ISH_JIT_COMPACT");
     if (cm)
         jit_tier1_compact = atoi(cm) != 0;
+    const char *ff = getenv("ISH_JIT_FORWARD_FALLTHROUGH");
+    jit_forward_fallthrough = ff && strcmp(ff, "1") == 0;
     const char *t = getenv("ISH_JIT_TICK_US");
     if (t)
         tick_us = atoi(t);

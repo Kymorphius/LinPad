@@ -21,12 +21,22 @@ final class DesktopBridge: NSObject {
 
     @MainActor
     @objc static func makeRootViewController() -> UIViewController {
+        makeRootViewController(switchToTerminal: { _ in false }, switchToDesktop: {}, adoptingTerminal: nil)
+    }
+
+    @MainActor
+    @objc(makeRootViewControllerWithSwitchToTerminal:switchToDesktop:adoptingTerminal:)
+    static func makeRootViewController(switchToTerminal: @escaping (UIViewController) -> Bool,
+                                       switchToDesktop: @escaping () -> Void,
+                                       adoptingTerminal: UIViewController?) -> UIViewController {
         // White terminals clash with the dark desktop; only overrides the untouched default.
         let preferences = UserPreferences.shared()
         if preferences.colorScheme == .ColorSchemeMatchSystem {
             preferences.colorScheme = .ColorSchemeAlwaysDark
         }
         let host = ISHLinuxHost()
+        host.switchToTerminal = switchToTerminal
+        host.switchToDesktopAction = switchToDesktop
         // Before anything else can crash: how the last session ended, MetricKit, the marker.
         DiagnosticsCenter.shared.beginSession(host: host)
         // Waits for the guest's PulseAudio FIFO, which the Linux session (ishwl-session)
@@ -36,11 +46,17 @@ final class DesktopBridge: NSObject {
         ISHMicBridge.shared.start(guestRoot: host.guestRootURL)
         // Light or dark is the desktop's choice (Settings > Desktop > Appearance); DesktopKit
         // sets the window's interface style itself.
-        let root = DesktopRootView(host: host, apps: BuiltinApps.all(), systemControls: ISHSystemControls())
+        let root = DesktopRootView(host: host, apps: BuiltinApps.all(), systemControls: ISHSystemControls(),
+                                   adoptingTerminal: adoptingTerminal)
             .ignoresSafeArea()
         let controller = DesktopHostingController(rootView: root)
         controller.view.backgroundColor = .black
         return controller
+    }
+
+    @MainActor
+    @objc static func releaseTerminal(_ controller: UIViewController) {
+        (controller as? TerminalFullscreenController)?.releaseSession()
     }
 }
 

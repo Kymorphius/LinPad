@@ -258,9 +258,21 @@ final class DesktopKeyCommands {
 
     func install(on host: UIViewController) {
         guard host !== self.host else { return }
+        uninstall()
         self.host = host
         tableCommands = []
         syncOverlayCommands()
+    }
+
+    func uninstall() {
+        if let host {
+            tableCommands.forEach(host.removeKeyCommand)
+            overlayCommands.forEach(host.removeKeyCommand)
+        }
+        tableCommands = []
+        overlayCommands = []
+        host = nil
+        if Self.active === self { Self.active = nil }
     }
 
     /// The table's bindings, minus ⌘ chords while a Linux app or the terminal has focus.

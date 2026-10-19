@@ -77,11 +77,15 @@ struct mem_usage get_mem_usage() {
     // allowance (footprint + headroom) and MemAvailable what is left of it:
     // Firefox, V8 and allocators size their caches and heaps from MemTotal, and
     // Firefox's low-memory watcher compares MemAvailable with it.
+    // The allowance can exceed host physical memory (for example with an
+    // increased-memory entitlement), so a physical-memory cap would hide usage.
+    // A zero headroom retains the existing host fallback; Active/Inactive also
+    // remain host statistics rather than a breakdown of the app's allowance.
     uint64_t headroom = host_memory_headroom();
     if (headroom != 0) {
-        uint64_t allowance = host_memory_footprint() + headroom;
-        if (allowance < usage.total)
-            usage.total = allowance;
+        uint64_t footprint = host_memory_footprint();
+        usage.total = footprint > UINT64_MAX - headroom
+            ? UINT64_MAX : footprint + headroom;
         usage.available = headroom;
         usage.free = headroom;
         usage.cached = 0;   // the host's file cache is not part of this allowance

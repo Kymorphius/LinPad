@@ -1,5 +1,6 @@
 import SwiftUI
 import Perception
+import UIKit
 
 struct DesktopToast: Identifiable, Equatable {
     struct Action {
@@ -24,6 +25,8 @@ final class DesktopController {
     private static let maximumVisibleToasts = 4
 
     let host: any LinuxHost
+    /// Whether this retained desktop currently owns its scene's visible interface.
+    var isDesktopActive = true
     let apps: [DesktopAppDescriptor]
     let windowManager = WindowManager()
     let systemMonitor = PanelSystemMonitor()
@@ -43,6 +46,8 @@ final class DesktopController {
     var systemIsDark = true
     @PerceptionIgnored var scheduleTask: Task<Void, Never>?
     @PerceptionIgnored var linuxFontsTask: Task<Void, Never>?
+    @PerceptionIgnored var startupTask: Task<Void, Never>?
+    @PerceptionIgnored var initialTerminal: UIViewController?
     /// The colour theme picker (⌃⌥⇧Space), while open.
     var themePicker: ColorThemePicker?
     /// The Command Menu (⌘K), while open.
@@ -209,7 +214,10 @@ final class DesktopController {
             wallpaperToast = notify(message, action: DesktopToast.Action(title: "Undo", perform: undo))
             wallpaperDidChange()
         }
-        keyboard.onSwitcherModifierReleased = { [weak self] in self?.commitSwitcher() }
+        keyboard.onSwitcherModifierReleased = { [weak self] in
+            guard let self, self.input.isActive else { return }
+            self.commitSwitcher()
+        }
         windowManager.willChangeFocus = { [weak self] window in self?.input.captureSnapshot(of: window) }
         windowManager.onLayoutChange = { [weak self] in self?.session.scheduleSave() }
         windowManager.onWorkspacesRemapped = { [weak self] mapping in self?.wallpapers.remapWorkspaces(mapping) }
@@ -276,8 +284,35 @@ final class DesktopController {
             host: host, arguments: arguments,
             window: DesktopWindowHandle(window: window, manager: windowManager),
             desktop: actionsProxy)
-        window.content = descriptor.makeContent(context)
+        if appID == AppID.terminal {
+            let session = TerminalSession(context: context, controller: initialTerminal)
+            initialTerminal = nil
+            window.terminalSession = session
+            window.content = AnyView(TerminalAppView(context: context, session: session))
+        } else {
+            window.content = descriptor.makeContent(context)
+        }
         windowManager.present(window)
+    }
+
+    func switchToClassicTerminal() {
+        guard let switching = host as? ClassicTerminalSwitching, switching.canSwitchToClassicTerminal else { return }
+        var window = windowManager.focusedWindow.flatMap { $0.terminalSession == nil ? nil : $0 }
+            ?? windowManager.recentWindows(ofApp: AppID.terminal).first { $0.terminalSession != nil }
+        if window == nil {
+            open(appID: AppID.terminal, arguments: [:])
+            window = windowManager.focusedWindow
+        }
+        guard let window, let session = window.terminalSession, !session.isLeased else { return }
+        let fullscreen = TerminalFullscreenController(session: session, returnToDesktop: { [weak self, weak switching] in
+            session.requestDesktopFocusOnReclaim()
+            switching?.switchToDesktop()
+            self?.windowManager.focus(window.id)
+        }, sessionEnded: { [weak self, weak switching] in
+            switching?.switchToDesktop()
+            self?.windowManager.close(window.id)
+        })
+        if !switching.switchToClassicTerminal(fullscreen) { fullscreen.releaseSession() }
     }
 
     func notify(_ message: String) {

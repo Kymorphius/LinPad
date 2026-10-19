@@ -777,6 +777,12 @@ void SyncHostname(void) {
 }
 
 + (void)retryFastMode {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self retryFastMode];
+        });
+        return;
+    }
     if (fastModeBusy)
         return;
     BOOL booted = bootPhase == ISHBootPhaseRunning;

@@ -69,6 +69,76 @@ final class KeyboardAvoidanceTests: XCTestCase {
         XCTAssertEqual(squeezed.minY, 0)
     }
 
+    func testTerminalLiftPreservesItsSizeEvenWhenItCannotFitAboveTheKeyboard() {
+        let frames = [
+            CGRect(x: 100, y: 20, width: 600, height: 300),
+            CGRect(x: 100, y: 400, width: 600, height: 300),
+            CGRect(x: 100, y: 20, width: 600, height: 700),
+        ]
+        for available in [CGFloat(420), 150] {
+            for frame in frames {
+                let lifted = WindowGeometry.liftingAboveKeyboard(frame, availableHeight: available)
+                XCTAssertEqual(lifted.size, frame.size)
+                XCTAssertEqual(lifted.minX, frame.minX)
+                XCTAssertEqual(lifted.minY, frame.maxY > available ? max(0, available - frame.height) : frame.minY)
+            }
+        }
+        for available in [CGFloat(0), -100, 760] {
+            XCTAssertEqual(WindowGeometry.liftingAboveKeyboard(frames[2], availableHeight: available), frames[2])
+        }
+    }
+
+    @MainActor
+    func testOnlyTerminalAvoidanceLeavesHeightToItsNativeController() {
+        let manager = WindowManager()
+        manager.updateDesktopSize(desktop.size)
+        let terminal = manager.makeWindow(appID: AppID.terminal, symbol: "terminal", title: "Terminal",
+                                          preferredSize: CGSize(width: 600, height: 700))
+        manager.present(terminal)
+        let original = CGRect(x: 100, y: 20, width: 600, height: 700)
+        terminal.frame = original
+        manager.updateKeyboard(docked(340), hardwareKeyboard: false)
+        XCTAssertEqual(manager.displayFrame(for: terminal), CGRect(x: 100, y: 0, width: 600, height: 700))
+        XCTAssertEqual(terminal.frame, original)
+        manager.resetKeyboard()
+        XCTAssertEqual(manager.displayFrame(for: terminal), original)
+
+        let files = manager.makeWindow(appID: AppID.files, symbol: "folder", title: "Files", preferredSize: original.size)
+        manager.present(files)
+        files.frame = original
+        manager.updateKeyboard(docked(340), hardwareKeyboard: false)
+        XCTAssertEqual(manager.displayFrame(for: files), CGRect(x: 100, y: 0, width: 600, height: 420))
+        XCTAssertEqual(files.frame, original)
+        XCTAssertEqual(manager.displayFrame(for: terminal), original, "only the focused window avoids the keyboard")
+        manager.focus(terminal.id)
+        XCTAssertEqual(manager.displayFrame(for: files), original, "changing focus releases the old lift")
+        XCTAssertEqual(manager.displayFrame(for: terminal), original, "a new keyboard frame is required after focus changes")
+    }
+
+    @MainActor
+    func testTerminalKeyboardLiftPreservesSnapAndMaximizeRestoration() {
+        let manager = WindowManager()
+        manager.updateDesktopSize(desktop.size)
+        let terminal = manager.makeWindow(appID: AppID.terminal, symbol: "terminal", title: "Terminal",
+                                          preferredSize: CGSize(width: 600, height: 700))
+        manager.present(terminal)
+        let floating = terminal.frame
+        for zone in [SnapZone.rightHalf, .bottomRight, .maximize] {
+            manager.resetKeyboard()
+            manager.snap(terminal.id, to: zone)
+            let original = manager.displayFrame(for: terminal)
+            let snap = terminal.snap
+            let maximized = terminal.isMaximized
+            manager.updateKeyboard(docked(340), hardwareKeyboard: false)
+            XCTAssertEqual(manager.displayFrame(for: terminal).size, original.size)
+            XCTAssertEqual(terminal.frame, floating)
+            XCTAssertEqual(terminal.snap, snap)
+            XCTAssertEqual(terminal.isMaximized, maximized)
+            manager.resetKeyboard()
+            XCTAssertEqual(manager.displayFrame(for: terminal), original)
+        }
+    }
+
     @MainActor
     func testWindowManagerRestoresTheExactFrame() {
         let manager = WindowManager()

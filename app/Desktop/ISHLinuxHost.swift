@@ -9,7 +9,7 @@ import UIKit
 /// boots the kernel afterwards (`AppDelegate.bootPhase()`); `preparation` mirrors that for
 /// the desktop's boot splash. Commands and terminals wait until the kernel runs.
 @MainActor
-final class ISHLinuxHost: LinuxGraphicsHost, LinuxSystemPreparing, FastModeControlling {
+final class ISHLinuxHost: LinuxGraphicsHost, LinuxSystemPreparing, FastModeControlling, ClassicTerminalSwitching {
     let homeDirectory = "/root"
     private(set) var hostName: String
     let preparation = LinuxSystemPreparation(phase: .unpacking)
@@ -17,6 +17,14 @@ final class ISHLinuxHost: LinuxGraphicsHost, LinuxSystemPreparing, FastModeContr
         AppDelegate.retryFastMode()
     }
     private var bootWaiters: [CheckedContinuation<Void, Never>] = []
+    var switchToTerminal: ((UIViewController) -> Bool)?
+    var switchToDesktopAction: (() -> Void)?
+    var canSwitchToClassicTerminal: Bool { preparation.phase == .ready && switchToTerminal != nil }
+    func switchToClassicTerminal(_ controller: UIViewController) -> Bool {
+        guard canSwitchToClassicTerminal else { return false }
+        return switchToTerminal?(controller) ?? false
+    }
+    func switchToDesktop() { switchToDesktopAction?() }
 
     /// The fakefs keeps file contents in `<root>/data`, at their guest paths, which is
     /// what lets the Linux GUI bridge share frame buffers and FIFOs with the guest.
@@ -273,6 +281,7 @@ private final class PendingTerminalViewController: UIViewController {
             terminal.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             self.view.addSubview(terminal.view)
             terminal.didMove(toParent: self)
+            NotificationCenter.default.post(name: Notification.Name("DesktopTerminalInputReady"), object: self)
         }
     }
 }

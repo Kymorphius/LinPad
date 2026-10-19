@@ -44,15 +44,24 @@ private struct LinPadLinkPresenter: ViewModifier {
     func body(content: Content) -> some View {
         WithPerceptionTracking {
             content
-                .sheet(item: inbox.binding(\.pending)) { pending in
+                .sheet(item: Binding(get: { controller.isDesktopActive ? inbox.pending : nil }, set: { value in
+                    if controller.isDesktopActive { inbox.pending = value }
+                })) { pending in
                     LinkConfirmationSheet(link: pending.link, controller: controller)
                 }
                 .onChangeCompat(of: inbox.rejected) { _, url in
-                    guard url != nil else { return }
-                    controller.notify("That LinPad link is damaged or not supported by this version.")
-                    inbox.rejected = nil
+                    showRejectionIfVisible(url)
+                }
+                .onChangeCompat(of: controller.isDesktopActive, initial: true) { _, active in
+                    if active { showRejectionIfVisible(inbox.rejected) }
                 }
         }
+    }
+
+    private func showRejectionIfVisible(_ url: URL?) {
+        guard controller.isDesktopActive, url != nil else { return }
+        controller.notify("That LinPad link is damaged or not supported by this version.")
+        inbox.rejected = nil
     }
 }
 

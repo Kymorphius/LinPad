@@ -33,6 +33,13 @@ public struct DesktopRootView: View {
         _controller = State(initialValue: DesktopController(host: host, apps: apps, systemControls: systemControls))
     }
 
+    public init(host: any LinuxHost, apps: [DesktopAppDescriptor], systemControls: any DesktopSystemControls,
+                adoptingTerminal: UIViewController?) {
+        let controller = DesktopController(host: host, apps: apps, systemControls: systemControls)
+        controller.initialTerminal = adoptingTerminal
+        _controller = State(initialValue: controller)
+    }
+
     public var body: some View {
         WithPerceptionTracking { root }
     }
@@ -103,6 +110,7 @@ public struct DesktopRootView: View {
             controller.wallpapers.currentWorkspace = workspace
         }
         .onChangeCompat(of: controller.windowManager.focusedWindowID) { _, id in
+            guard controller.input.isActive else { return }
             controller.keyboardFocusChanged(to: id)
             controller.windowFocusChanged(id)
             controller.keyCommands.syncOverlayCommands()
@@ -120,18 +128,32 @@ public struct DesktopRootView: View {
         .onChangeCompat(of: controller.desktopHasKeyboardFocus) { _, _ in
             controller.keyCommands.syncOverlayCommands()
         }
+        .onAppear {
+            controller.idle.noteActivity()
+            controller.input.setActive(true)
+        }
+        .onDisappear { controller.input.setActive(false) }
         .task {
-            _ = controller.lifecycle
-            openStartupWindows()
-            controller.noticeRestoredSession(previousExit: DiagnosticsCenter.shared.previousExit)
-            if !UserDefaults.standard.bool(forKey: OnboardingFlow.completedKey) {
-                controller.presentOnboarding()
+            guard controller.startupTask == nil else { return }
+            controller.startupTask = Task { @MainActor in
+                _ = controller.lifecycle
+                let adopting = controller.initialTerminal
+                controller.initialTerminal = nil
+                openStartupWindows()
+                if let adopting {
+                    controller.initialTerminal = adopting
+                    controller.open(appID: AppID.terminal, arguments: [:])
+                }
+                controller.noticeRestoredSession(previousExit: DiagnosticsCenter.shared.previousExit)
+                if !UserDefaults.standard.bool(forKey: OnboardingFlow.completedKey) {
+                    controller.presentOnboarding()
+                }
+                await controller.boot.run(host: controller.host, linux: controller.linux)
+                controller.offerSystemUpdateIfAvailable()
+                controller.startUpdateChecks()
+                controller.startMaintenance()
+                controller.offerFastModeRetryIfFailed()
             }
-            await controller.boot.run(host: controller.host, linux: controller.linux)
-            controller.offerSystemUpdateIfAvailable()
-            controller.startUpdateChecks()
-            controller.startMaintenance()
-            controller.offerFastModeRetryIfFailed()
         }
         .animation(DesktopMotion.standard, value: controller.boot.isFinished)
         .linPadLinks(controller: controller)

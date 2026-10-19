@@ -19,6 +19,8 @@
 
 // Hosted inside a desktop window instead of being a scene's root view controller.
 @property (nonatomic) BOOL embedded;
+/// Transfers an existing classic shell into desktop-owned window lifetime.
+- (void)adoptAsDesktopTerminal;
 // Replaces UserPreferences.launchCommand for the next session started by this controller.
 @property (nonatomic, copy) NSArray<NSString *> *launchCommandOverride;
 

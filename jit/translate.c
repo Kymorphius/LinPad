@@ -7,6 +7,7 @@
 // exit so the gadget engine runs that one instruction.
 #include <string.h>
 #include <stdlib.h>
+#include "jit/jit.h"
 #include "jit/jit_internal.h"
 #include "jit/emit.h"
 #include "emu/tlb.h"
@@ -866,6 +867,11 @@ static int tr_branch(struct tr *t, uint32_t insn) {
         struct label taken = here(t, COLD);
         put_fix(t, HOT, e_bcond(cond, 0), FX_B19, TGT_LABEL, taken);
         exit_direct(t, COLD, target);
+        // Keep the untaken path in this block for forward conditionals. Taken
+        // exits are unchanged; backward/self branches still end the block and
+        // retain their exit-flag poll before chaining.
+        if (jit_forward_fallthrough && target > t->pc)
+            return 1;
         exit_direct(t, HOT, next);
         return 0;
     }
@@ -877,6 +883,8 @@ static int tr_branch(struct tr *t, uint32_t insn) {
         struct label taken = here(t, COLD);
         put_fix(t, HOT, (insn & ~31u) | h, tb ? FX_B14 : FX_B19, TGT_LABEL, taken);
         exit_direct(t, COLD, target);
+        if (jit_forward_fallthrough && target > t->pc)
+            return 1;
         exit_direct(t, HOT, next);
         return 0;
     }
@@ -1183,9 +1191,13 @@ struct jit_block *jit_translate(struct jit_mm *mm, struct jit_ctx *ctx, addr_t p
     if (tier == 1 && !cacheable && !jit_force_tier1)
         tier = 2;
     struct jit_image cached;
-    if (tier == 1 && jit_pcache_lookup(pc, insns, n, &cached))
+    // Experimental images must neither reuse nor populate the default cache:
+    // its key does not distinguish the forward-fallthrough policy. Cacheability
+    // and tier decisions above stay the same (and can still inspect metadata).
+    bool use_pcache = !jit_forward_fallthrough;
+    if (tier == 1 && use_pcache && jit_pcache_lookup(pc, insns, n, &cached))
         return jit_install_image(mm, pc, &cached, gen);
-    bool offer = tier == 1 && cacheable;
+    bool offer = tier == 1 && cacheable && use_pcache;
 
     struct tr t;
     tr_init(&t, pc);

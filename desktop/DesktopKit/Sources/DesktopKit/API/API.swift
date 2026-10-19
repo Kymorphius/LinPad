@@ -85,6 +85,14 @@ public extension LinuxHost {
     }
 }
 
+/// Optional in-process presentation of the same terminal session in classic mode.
+@MainActor
+public protocol ClassicTerminalSwitching: AnyObject {
+    var canSwitchToClassicTerminal: Bool { get }
+    @discardableResult func switchToClassicTerminal(_ controller: UIViewController) -> Bool
+    func switchToDesktop()
+}
+
 /// Optional: a host whose guest filesystem the app can also reach directly.
 /// Hosts that adopt it get Linux GUI apps: each Wayland toplevel opens as a
 /// desktop window (Linux/LinuxGUIBridge.swift). The bridge shares frame buffers

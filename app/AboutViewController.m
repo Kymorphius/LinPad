@@ -14,6 +14,7 @@
 #import "iOSFS.h"
 #import "UIApplication+OpenURL.h"
 #import "NSObject+SaneKVO.h"
+#import "SceneDelegate.h"
 
 @interface AboutViewController ()
 @property (weak, nonatomic) IBOutlet UITableViewCell *capsLockMappingCell;
@@ -53,6 +54,13 @@
                                                                                  target:self
                                                                                  action:@selector(exitRecovery:)];
         self.navigationItem.leftBarButtonItem = nil;
+    } else if (NSClassFromString(@"DesktopBridge") &&
+               [self.navigationController.presentingViewController isKindOfClass:TerminalViewController.class] &&
+               !((TerminalViewController *)self.navigationController.presentingViewController).embedded) {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Desktop"
+                                                                                  style:UIBarButtonItemStylePlain
+                                                                                 target:self
+                                                                                 action:@selector(switchToDesktop:)];
     }
     NSString *appName = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleDisplayName"] ?: @"iSH";
     _versionLabel.text = [NSString stringWithFormat:@"%@ %@ (Build %@)%@", appName,
@@ -67,6 +75,13 @@
         });
     }];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(_updateUI:) name:FsUpdatedNotification object:nil];
+}
+
+- (void)switchToDesktop:(id)sender {
+    UIWindowScene *scene = self.view.window.windowScene;
+    if (![scene.delegate isKindOfClass:SceneDelegate.class]) return;
+    SceneDelegate *delegate = (SceneDelegate *)scene.delegate;
+    [self dismissViewControllerAnimated:YES completion:^{ [delegate switchToDesktop]; }];
 }
 
 - (void)viewWillAppear:(BOOL)animated {

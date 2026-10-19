@@ -70,6 +70,24 @@ jobs:
           echo "$(wc -l < "$RUNNER_TEMP/scripts.txt") scripts"
           xargs shellcheck --severity=warning --format=gcc < "$RUNNER_TEMP/scripts.txt"
 
+      - name: Managed SSH recovery checks
+        run: |
+          python3 tests/unit/setup-guest-ssh-health-test.py
+          python3 tests/unit/ssh-resume-hook-test.py
+          python3 - <<'EOF'
+          import os
+          from pathlib import Path
+
+          source = Path("tools/setup_guest_ssh.sh").read_text()
+          for label, variable in (("HELPER", "helper_tmp"), ("RESUME_HOOK", "resume_tmp")):
+              marker = f"    cat > \"${variable}\" <<'{label}'\n"
+              assert source.count(marker) == 1, label
+              script = source.split(marker, 1)[1].split(f"\n{label}\n", 1)[0] + "\n"
+              (Path(os.environ["RUNNER_TEMP"]) / f"linpad-ssh-{label.lower()}.sh").write_text(script)
+          EOF
+          shellcheck --severity=warning --format=gcc tools/setup_guest_ssh.sh \
+            "$RUNNER_TEMP/linpad-ssh-helper.sh" "$RUNNER_TEMP/linpad-ssh-resume_hook.sh"
+
       - name: Validate catalog.json and themes.json
         run: |
           python3 - <<'EOF'
@@ -162,6 +180,12 @@ jobs:
         run: |
           brew install llvm lld meson libarchive coreutils
           echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+
+      - name: Native poll readiness regressions
+        run: tests/unit/poll-test.sh
+
+      - name: Terminal keyboard geometry regressions
+        run: tests/unit/terminal-keyboard-test.sh
 
       - name: Configure and build (arm64 guest, JIT enabled)
         run: |

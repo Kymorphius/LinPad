@@ -64,11 +64,13 @@ final class IdleMonitor {
     }
 
     private func check() async {
-        guard let controller, controller.boot.isFinished, !controller.isOnboardingPresented else { return }
+        guard let controller, controller.input.isActive, controller.boot.isFinished,
+              !controller.isOnboardingPresented else { return }
         let policy = IdleSettings.policy
         let idle = Date().timeIntervalSince(lastActivity)
         guard let shortest = policy.shortestTimeout, idle >= shortest else { return }
         let inhibited = await isInhibited(controller)
+        guard controller.input.isActive else { return }
         let actions = policy.actions(idle: Date().timeIntervalSince(lastActivity), isLocked: controller.isLocked,
                                      isScreensaverShown: isScreensaverShown, inhibited: inhibited)
         if actions.lock { controller.lockScreen() }

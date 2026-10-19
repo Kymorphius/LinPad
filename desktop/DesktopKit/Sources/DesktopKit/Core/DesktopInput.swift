@@ -72,17 +72,20 @@ final class DesktopInputCoordinator: NSObject, UIGestureRecognizerDelegate {
     weak var controller: DesktopController?
     private(set) weak var referenceView: UIView?
     private weak var installedWindow: UIWindow?
+    private weak var installedRoot: UIViewController?
     private var recognizers: [UIGestureRecognizer] = []
     private var keyboardObserver: NSObjectProtocol?
     private var hideObservers: [NSObjectProtocol] = []
     private var keyboardFrame: CGRect = .null
     private var pendingInterfaceStyle: UIUserInterfaceStyle?
+    private(set) var isActive = true
 
     private static let snapshotScale: CGFloat = 0.5
     private static let swipeDistance: CGFloat = 70
 
     func attach(to view: UIView) {
         referenceView = view
+        guard isActive else { return }
         guard let window = view.window, window !== installedWindow else { return }
         recognizers.forEach { $0.view?.removeGestureRecognizer($0) }
         installedWindow = window
@@ -99,6 +102,7 @@ final class DesktopInputCoordinator: NSObject, UIGestureRecognizerDelegate {
         recognizers.forEach(window.addGestureRecognizer)
 
         if let controller, let root = window.rootViewController {
+            installedRoot = root
             controller.keyCommands.install(on: root)
             DesktopKeyCommands.active = controller.keyCommands
         }
@@ -118,19 +122,48 @@ final class DesktopInputCoordinator: NSObject, UIGestureRecognizerDelegate {
         }
     }
 
+    func setActive(_ active: Bool) {
+        guard isActive != active else { return }
+        isActive = active
+        controller?.isDesktopActive = active
+        if active {
+            if let referenceView { attach(to: referenceView) }
+            controller?.windowFocusChanged(controller?.windowManager.focusedWindowID)
+        } else {
+            controller?.linux?.releaseHeldInput()
+            if let responder = UIResponder.desktopCurrentFirstResponder as? UIView,
+               ownsResponder(responder) {
+                responder.resignFirstResponder()
+            }
+            recognizers.forEach { $0.view?.removeGestureRecognizer($0) }
+            recognizers = []
+            installedWindow = nil
+            installedRoot = nil
+            controller?.keyCommands.uninstall()
+            keyboardHidden()
+        }
+    }
+
+    /// Tracking the desktop root makes this safe even if UIKit has already
+    /// installed another interface in the same UIWindow before onDisappear fires.
+    func ownsResponder(_ responder: UIView) -> Bool {
+        guard let root = installedRoot, root.isViewLoaded else { return false }
+        return responder === root.view || responder.isDescendant(of: root.view)
+    }
+
     /// Key commands are looked up from the first responder; with none (after a text field
     /// goes away, or a tap on the wallpaper) UIKit drops hardware shortcuts altogether. The
     /// anchor view then takes first responder: it accepts no text, so no on-screen keyboard
     /// appears, and the shell's key commands are on its responder chain.
     func ensureKeyCommandsReachable() {
-        guard let referenceView, referenceView.window != nil,
+        guard isActive, let referenceView, referenceView.window != nil,
               UIResponder.desktopCurrentFirstResponder == nil else { return }
         referenceView.becomeFirstResponder()
     }
 
     /// Context menus, the keyboard and other UIKit chrome follow the desktop's appearance.
     func setInterfaceStyle(_ style: UIUserInterfaceStyle) {
-        referenceView?.window?.overrideUserInterfaceStyle = style
+        if isActive { referenceView?.window?.overrideUserInterfaceStyle = style }
         pendingInterfaceStyle = style
     }
 
@@ -166,6 +199,7 @@ final class DesktopInputCoordinator: NSObject, UIGestureRecognizerDelegate {
     // MARK: Keyboard avoidance
 
     private func keyboardFrameChanged(_ screenFrame: CGRect) {
+        guard isActive else { return }
         keyboardFrame = screenFrame
         guard let referenceView, let window = referenceView.window else { return }
         let local = screenFrame.isNull ? nil : referenceView.convert(screenFrame, from: window.screen.coordinateSpace)
