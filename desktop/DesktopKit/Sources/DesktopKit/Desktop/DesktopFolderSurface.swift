@@ -747,6 +747,7 @@ struct DesktopFolderSurface: View {
     }
 
     private func clearSelection() {
+        controller.windowManager.clearFocus()
         model.selection = []
     }
 

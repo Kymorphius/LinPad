@@ -8,7 +8,7 @@ name:
 after_name:
     .balign 4
 note:
-    .long (4 << 16) | (20 << 8) | 69 // 4.20.69
+    .long (6 << 16) | (12 << 8) | 0 // 6.12.0
 after_note:
     .balign 4
 .popsection

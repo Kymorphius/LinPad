@@ -49,7 +49,7 @@ public final class MockLinuxHost: LinuxHost {
 
         switch trimmed {
         case "uname -a":
-            return CommandResult(stdout: "Linux \(hostName) 4.20.69-ish #1 SMP PREEMPT aarch64 Linux\n")
+            return CommandResult(stdout: "Linux \(hostName) 6.12.0-ish #1 SMP PREEMPT aarch64 Linux\n")
         case "true":
             // DiagnosticsCenter's heartbeat.
             return CommandResult(stdout: "")

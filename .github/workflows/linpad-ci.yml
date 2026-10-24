@@ -166,6 +166,9 @@ jobs:
       - name: Native poll readiness regressions
         run: tests/unit/poll-test.sh
 
+      - name: Terminal keyboard geometry regressions
+        run: tests/unit/terminal-keyboard-test.sh
+
       - name: Configure and build (arm64 guest, JIT enabled)
         run: |
           meson setup build -Dguest_arch=arm64 -Djit=enabled --buildtype=release

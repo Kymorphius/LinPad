@@ -28,7 +28,7 @@ final class AppsPreviewHost: LinuxHost {
         }
         if command.hasPrefix("uname") {
             return CommandResult(stdout: """
-                Linux ipad 4.20.69-ish SUPER AWESOME aarch64 Linux
+                Linux ipad 6.12.0-ish SUPER AWESOME aarch64 Linux
                 __DK_SECTION__
                 3.21.0
                 __DK_SECTION__

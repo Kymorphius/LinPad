@@ -578,7 +578,7 @@ FASTFETCH = r"""/ # fastfetch
                               <span class="c4">Chip</span>    Apple silicon (10 cores, emulated by iSH)
                               <span class="c4">JIT</span>     compatibility (threaded code; fast mode is off)
                               <span class="c4">GPU</span>     Apple iOS simulator GPU via Metal (Venus)
-                              <span class="c4">Kernel</span>  Linux 4.20.69-ish
+                              <span class="c4">Kernel</span>  Linux 6.12.0-ish
                               <span class="c4">Shell</span>   sh
 
                               <span class="sw"><i class="b0"></i><i class="b1"></i><i class="b2"></i><i class="b3"></i><i class="b4"></i><i class="b5"></i><i class="b6"></i><i class="b7"></i></span>
